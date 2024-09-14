@@ -26,12 +26,12 @@ if __name__ == '__main__':
     fig, title = main(
         BoTorchSampler,
         n_trials=None,
-        timeout=60,
+        timeout=3600,
         with_constraints=True,
         n_startup_trials=1,
         add_penalty=False,
         add_constraints=False,
-        storage_name=f'botorch_2',
+        storage_name=f'botorch_3600sec',
     )
     path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
     save_figure(fig, path)

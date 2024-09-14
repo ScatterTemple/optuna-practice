@@ -31,7 +31,6 @@ def main(
         replace_qExpectedHypervolumeImprovement: bool = False,
         storage_name: str = None,
 ):
-
     kwargs: dict = dict(seed=42, n_startup_trials=n_startup_trials)
     if with_constraints:
         kwargs.update(dict(constraints_func=constraints))

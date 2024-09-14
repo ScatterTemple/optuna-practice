@@ -16,6 +16,10 @@ def objectives(trial: Trial):
 
     c1 = _constraint_1(r, theta)
     c2 = _constraint_2(r, theta)
+
+    if not (c1 <= 0 and c2 <= 0):
+        return None
+
     trial.set_user_attr(CONSTRAINTS_KEY, (c1, c2))
 
     x = _objective_1(r, theta)
@@ -95,7 +99,6 @@ def create_space_fig():
             ),
         )
     )
-
 
     return fig
 
