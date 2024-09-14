@@ -1,0 +1,79 @@
+import os
+import datetime
+from optuna.samplers import TPESampler
+from optuna_integration import BoTorchSampler
+from src.template.template import main, save_figure
+
+
+if __name__ == '__main__':
+    os.chdir(os.path.dirname(__file__))
+
+    # TPE
+    fig, title = main(
+        TPESampler,
+        n_trials=None,
+        timeout=5,
+        with_constraints=True,
+        n_startup_trials=1,
+        add_penalty=False,
+        add_constraints=False,
+        # storage_name=f'',
+    )
+    path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
+    save_figure(fig, path)
+
+    # raw BoTorch
+    fig, title = main(
+        BoTorchSampler,
+        n_trials=None,
+        timeout=60,
+        with_constraints=True,
+        n_startup_trials=1,
+        add_penalty=False,
+        add_constraints=False,
+        storage_name=f'botorch_2',
+    )
+    path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
+    save_figure(fig, path)
+
+    # constrained BoTorch
+    fig, title = main(
+        BoTorchSampler,
+        n_trials=None,
+        timeout=3600,
+        with_constraints=True,
+        n_startup_trials=1,
+        add_penalty=False,
+        add_constraints=True,
+        storage_name=f'constrained_botorch_3600sec_log',
+    )
+    path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
+    save_figure(fig, path)
+
+    # penalized BoTorch
+    fig, title = main(
+        BoTorchSampler,
+        n_trials=None,
+        timeout=3600,
+        with_constraints=True,
+        n_startup_trials=1,
+        add_penalty=True,
+        add_constraints=False,
+        storage_name=f'penalized_botorch_3600sec',
+    )
+    path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
+    save_figure(fig, path)
+
+    # penalized constrained BoTorch
+    fig, title = main(
+        BoTorchSampler,
+        n_trials=None,
+        timeout=3600,
+        with_constraints=True,
+        n_startup_trials=1,
+        add_penalty=True,
+        add_constraints=True,
+        storage_name=f'constrained_penalized_botorch_3600sec',
+    )
+    path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
+    save_figure(fig, path)
