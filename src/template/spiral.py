@@ -83,7 +83,7 @@ def create_space_fig():
             y=y_infeasible,
             mode='markers',
             marker=dict(
-                color='white',
+                color='skyblue',
                 size=20,
             ),
         )

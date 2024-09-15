@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 from functools import partial
 
@@ -6,12 +6,16 @@ import numpy as np
 from optuna.study import Study
 import torch
 from torch import Tensor
+from botorch.models.transforms.input import InputTransform
+from botorch.models.transforms.outcome import OutcomeTransform
+from gpytorch import Module
+from gpytorch.likelihoods import Likelihood
+from gpytorch.means import Mean
 from botorch.acquisition import AcquisitionFunction
 
 from optuna._transform import _SearchSpaceTransform
 
 from botorch.optim.initializers import gen_batch_initial_conditions
-from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
 
 Constraint = Callable[[dict], float]  # <= 0 is feasible (based on optuna)
 
@@ -22,6 +26,7 @@ def do_patch(
         add_penalty=True,
         add_constraints=True,
         replace_qExpectedHypervolumeImprovement=True,
+        use_deterministic=False,
 ):
     """BoTorchSampler の optimize_acqf をパッチします。"""
     import optuna_integration
@@ -43,10 +48,40 @@ def do_patch(
         optuna_integration.botorch.optimize_acqf = new_fun
 
     if replace_qExpectedHypervolumeImprovement:
+        from botorch.acquisition.multi_objective.logei import qLogExpectedHypervolumeImprovement
         if int(version.__version__.split('.')[0]) >= 4:
             optuna_integration.botorch.botorch.monte_carlo.qExpectedHypervolumeImprovement = qLogExpectedHypervolumeImprovement
         else:
             optuna_integration.botorch.monte_carlo.qExpectedHypervolumeImprovement = qLogExpectedHypervolumeImprovement
+
+    if use_deterministic:
+
+        from botorch.models import SingleTaskGP
+
+        class FixedNoiseSingleTaskGP(SingleTaskGP):
+
+            def __init__(
+                    self,
+                    train_X: Tensor,
+                    train_Y: Tensor,
+                    train_Yvar: Optional[Tensor] = None,
+                    likelihood: Optional[Likelihood] = None,
+                    covar_module: Optional[Module] = None,
+                    mean_module: Optional[Mean] = None,
+                    outcome_transform: Optional[OutcomeTransform] = None,
+                    input_transform: Optional[InputTransform] = None
+            ) -> None:
+                if train_Yvar is None:
+                    # noinspection PyPep8Naming
+                    train_Yvar = torch.full_like(train_Y, 1e-5, dtype=torch.double, device='cpu')
+
+                super().__init__(train_X, train_Y, train_Yvar, likelihood, covar_module, mean_module, outcome_transform,
+                                 input_transform)
+
+        if int(version.__version__.split('.')[0]) >= 4:
+            optuna_integration.botorch.botorch.SingleTaskGP = FixedNoiseSingleTaskGP
+        else:
+            optuna_integration.botorch.SingleTaskGP = FixedNoiseSingleTaskGP
 
 
 class GeneralFunctionWithForwardDifference(torch.autograd.Function):

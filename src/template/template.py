@@ -29,6 +29,7 @@ def main(
         add_constraints: bool = True,
         add_penalty: bool = True,
         replace_qExpectedHypervolumeImprovement: bool = False,
+        use_deterministic: bool = False,
         storage_name: str = None,
 ):
     kwargs: dict = dict(seed=42, n_startup_trials=n_startup_trials)
@@ -51,6 +52,7 @@ def main(
         add_constraints=add_constraints,
         add_penalty=add_penalty,
         replace_qExpectedHypervolumeImprovement=replace_qExpectedHypervolumeImprovement,
+        use_deterministic=use_deterministic,
     )
 
     start = time()
@@ -106,10 +108,11 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(__file__))
 
     fig, title = main(
-        TPESampler,
+        BoTorchSampler,
         n_trials=None,
         timeout=3,
-        with_constraints=True
+        with_constraints=True,
+        use_deterministic=True,
     )
 
     path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
