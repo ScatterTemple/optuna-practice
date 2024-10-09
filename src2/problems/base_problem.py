@@ -17,7 +17,7 @@ class AbstractProblem(ABC):
 
     @property
     @abstractmethod
-    def bounds(self) -> list[list[float, float]]:
+    def bounds(self) -> list[list[float, float]] or Floats:
         pass
 
     def objective(self, x: Floats) -> Floats:

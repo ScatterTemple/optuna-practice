@@ -4,7 +4,7 @@ from src2.problems.base_problem import Floats
 import numpy as np
 
 
-class Random(AbstractManager):
+class RandomManager(AbstractManager):
 
     def setup(self):
         pass
