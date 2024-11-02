@@ -100,3 +100,5 @@ class AbstractManager(ABC):
 
             if show:
                 self.fig.show()
+
+        return x

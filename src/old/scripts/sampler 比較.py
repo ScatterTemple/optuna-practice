@@ -42,14 +42,14 @@ if __name__ == '__main__':
     fig, title = main(
         BoTorchSampler,
         n_trials=None,
-        timeout=600,
+        timeout=3600,
         with_constraints=True,
         n_startup_trials=1,
         add_penalty=True,
         add_constraints=False,
         use_deterministic=False,
         replace_qExpectedHypervolumeImprovement=False,
-        storage_name=f'penalized_botorch_600sec',
+        storage_name=f'penalized_botorch_3600sec',
     )
     path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
     save_figure(fig, path)
@@ -58,14 +58,14 @@ if __name__ == '__main__':
     fig, title = main(
         BoTorchSampler,
         n_trials=None,
-        timeout=600,
+        timeout=3600,
         with_constraints=True,
         n_startup_trials=1,
         add_penalty=True,
         add_constraints=False,
         use_deterministic=True,
         replace_qExpectedHypervolumeImprovement=False,
-        storage_name=f'penalized_deterministic_botorch_600sec',
+        storage_name=f'penalized_deterministic_botorch_3600sec',
     )
     path = os.path.join('images', title.replace('<BR>', ' ') + '.svg')
     save_figure(fig, path)

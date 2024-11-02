@@ -86,6 +86,10 @@ def main(
             sampler_name = 'Penalized' + sampler_name
         if add_constraints:
             sampler_name = 'Constrained' + sampler_name
+        if use_deterministic:
+            sampler_name = 'Deterministic' + sampler_name
+        if replace_qExpectedHypervolumeImprovement:
+            sampler_name = 'qLogEHI '
 
     title = (f'{len(df)} samples '
              f'by {sampler_name}<BR>'

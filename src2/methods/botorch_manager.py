@@ -87,46 +87,67 @@ class BayesianManager(AbstractManager):
         )
         fit_gpytorch_mll(mll)
 
-        # set reference points for hypervolume
-        ref_point = train_y.min(dim=0).values - 1e-8
-        ref_point = ref_point.squeeze()
-        ref_point_list = ref_point.tolist()
+        if n_objectives == 1:
+            best_f = train_y.max()
+            acqf = LogExpectedImprovement(
+                model=model,
+                best_f=best_f,
+            )
 
-        # Approximate box decomposition similar to Ax when the number of objectives is large.
-        # https://github.com/pytorch/botorch/blob/36d09a4297c2a0ff385077b7fcdd5a9d308e40cc/botorch/acquisition/multi_objective/utils.py#L46-L63
-        if n_objectives > 4:
-            alpha = 10 ** (-8 + n_objectives)
-        else:
-            alpha = 0.0
-        partitioning = NondominatedPartitioning(
-            ref_point=ref_point,
-            Y=train_y,
-            alpha=alpha
-        )
+            standard_bounds = torch.zeros_like(bounds)
+            standard_bounds[1] = 1
 
-        # set acqf
-        # acqf = qLogExpectedHypervolumeImprovement(
-        acqf = monte_carlo.qExpectedHypervolumeImprovement(
-            model=model,
-            ref_point=ref_point_list,
-            partitioning=partitioning,
-            sampler=_get_sobol_qmc_normal_sampler(256),
-            # X_pending=pending_x,
-            # **additional_qehvi_kwargs,
-        )
-        standard_bounds = torch.zeros_like(bounds)
-        standard_bounds[1] = 1
+            candidates, _ = optimize_acqf(
+                acq_function=acqf,
+                bounds=standard_bounds,
+                q=1,
+                num_restarts=10,
+                raw_samples=512,
+                options={"batch_limit": 5, "maxiter": 200},
+                sequential=True,
+            )
 
-        # calc candidates
-        candidates, _ = optimize_acqf(
-            acq_function=acqf,
-            bounds=standard_bounds,
-            q=1,
-            num_restarts=20,
-            raw_samples=1024,
-            options={"batch_limit": 5, "maxiter": 200, "nonnegative": True},
-            sequential=True,
-        )
+        elif n_objectives >= 2:
+            # set reference points for hypervolume
+            ref_point = train_y.min(dim=0).values - 1e-8
+            ref_point = ref_point.squeeze()
+            ref_point_list = ref_point.tolist()
+
+            # Approximate box decomposition similar to Ax when the number of objectives is large.
+            # https://github.com/pytorch/botorch/blob/36d09a4297c2a0ff385077b7fcdd5a9d308e40cc/botorch/acquisition/multi_objective/utils.py#L46-L63
+            if n_objectives > 4:
+                alpha = 10 ** (-8 + n_objectives)
+            else:
+                alpha = 0.0
+            partitioning = NondominatedPartitioning(
+                ref_point=ref_point,
+                Y=train_y,
+                alpha=alpha
+            )
+
+            # set acqf
+            # acqf = qLogExpectedHypervolumeImprovement(
+            acqf = monte_carlo.qExpectedHypervolumeImprovement(
+                model=model,
+                ref_point=ref_point_list,
+                partitioning=partitioning,
+                sampler=_get_sobol_qmc_normal_sampler(256),
+                # X_pending=pending_x,
+                # **additional_qehvi_kwargs,
+            )
+            standard_bounds = torch.zeros_like(bounds)
+            standard_bounds[1] = 1
+
+            # calc candidates
+            candidates, _ = optimize_acqf(
+                acq_function=acqf,
+                bounds=standard_bounds,
+                q=1,
+                num_restarts=20,
+                raw_samples=1024,
+                options={"batch_limit": 5, "maxiter": 200, "nonnegative": True},
+                sequential=True,
+            )
 
         candidates = unnormalize(candidates.detach(), bounds=bounds)
 
