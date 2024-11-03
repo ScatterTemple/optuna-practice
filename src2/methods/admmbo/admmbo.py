@@ -1,7 +1,7 @@
 import numpy as np
 from src2.methods.admmbo.admmo_type import (
     Problem, F, C, ADMM, Opt,
-    Input, Output, Inputs, Outputs, Bounds, ColVector
+    Input, Output, Inputs, Outputs, Bounds, ColVector, InputsEachCns
 )
 from src2.problems.base_problem import Floats
 from tqdm import tqdm
@@ -43,13 +43,18 @@ def bayesopt(_f: callable, opt: F,
     # 提供された inputs に基づいて initial sampling
     inputs: Inputs = []
     outputs: Outputs = []
-    for x in tqdm(opt.initial_points, '(一時的な実装による)初期サンプリングの再実行中...'):
+    for x in tqdm(opt.initial_points, '(一時的な実装による)bayesopt 初期サンプリングの再実行中...'):
         # assert isinstance(x, Input)
 
-        if temp_problem._hidden_constraint(x):
+        # if temp_problem._hidden_constraint(x):
+        if True:
             # feasible
             y = temp_problem._raw_objective(x)
             inputs.append(x)
+            outputs.append(y)
+        else:
+            y = temp_problem._raw_objective(initial_points[0])
+            inputs.append(initial_points[0])
             outputs.append(y)
 
     nd_inputs = np.array(inputs)
@@ -82,7 +87,7 @@ def bayesfeas(problem: Problem, opt: Opt, j: int,
     # いったんそれで実装してもいいと思う。
 
     # j 番目の callable のみ処理を通す
-    _c: callable
+    _c: callable  # if feasible: <= 0, so want to minimize this.
     for _j, _c in enumerate(problem.C):
         if j != j:
             continue
@@ -102,7 +107,7 @@ def bayesfeas(problem: Problem, opt: Opt, j: int,
             return _bounds
 
         def _raw_objective(self, _x: Floats) -> Floats:
-            return [_c(_x)]
+            return [-_c(_x)]  # botorch assumes maximization problem
 
         def _hidden_constraint(self, _x: Floats) -> bool:
             return True  # 拘束の評価は常に可能
@@ -114,7 +119,7 @@ def bayesfeas(problem: Problem, opt: Opt, j: int,
     # 提供された inputs に基づいて initial sampling
     inputs: Inputs = []
     outputs: Outputs = []
-    for x in tqdm(opt.c[j].initial_points, '(一時的な実装による)初期サンプリングの再実行中...'):
+    for x in tqdm(opt.c[j].initial_points, '(一時的な実装による)bayesfeas サンプリングの再実行中...'):
         # assert isinstance(x, Input)
 
         if temp_problem._hidden_constraint(x):
@@ -136,6 +141,7 @@ def bayesfeas(problem: Problem, opt: Opt, j: int,
 
     # ベイズ最適化
     for _ in tqdm(range(opt.f.max_iters), 'bayesfeas 最適化中...'):
+        # candidate x to maximize -_c()
         x = sampler.sampling()
         inputs.append(x)
 
@@ -235,7 +241,7 @@ def ADMMBO(problem: Problem, opt: Opt) -> tuple[Inputs, Input, Output]:
         # Checking if we have already satisfied the constraint's coonvergence criterion by C_check
         if np.all(C_check):
 
-            zmin: Inputs = [None for _ in problem.c]
+            zmin: InputsEachCns = [None for _ in problem.c]
             T_h: list[BoTrace or None] = [None for _ in problem.c]
             for j in range(len(problem.c)):
                 # Adapting the max number of BO iterations according to ADMMBO's inner loop
@@ -335,23 +341,35 @@ def incumbent_update(
 
 
 if __name__ == '__main__':
+
+    # ===== 問題設定 =====
+    # # spiral
+    # initial_points = np.array([
+    #     np.random.rand(100),  # r
+    #     np.random.rand(100) * np.pi * 2,  # theta
+    # ]).T
+    #
+    # from src2.problems.spiral import Spiral, COEF
+    # g_p = Spiral()
+    #
+    # def upper(x):
+    #     r, theta = x
+    #     return COEF * r - theta
+    #
+    # def lower(x):
+    #     r, theta = x
+    #     return theta - 2 * COEF * r
+
+    # gravity
+    from src2.problems.gravity import Gravity
+    g_p = Gravity()
+
     initial_points = np.array([
-        np.random.rand(100),  # r
-        np.random.rand(100) * np.pi * 2,  # theta
+        np.random.rand(100) * 2 - 1,  # x0
+        np.random.rand(100) * 2 - 1,  # x1
     ]).T
 
-    from src2.problems.spiral import Spiral, COEF
-    g_s = Spiral()
-
-    def upper(x):
-        r, theta = x
-        return COEF * r - theta
-
-    def lower(x):
-        r, theta = x
-        return theta - 2 * COEF * r
-
-
+    # ===== admoo =====
     rho = .1
     M = 50
     initial_bud_f = 10
@@ -364,11 +382,11 @@ if __name__ == '__main__':
     p = Problem()
     p.f = 'spiral'
     p.f_parameters = []
-    p.F = lambda x: np.array([-v for v in g_s._raw_objective(x)])  # 最大化問題に変換
-    p.c = ['upper', 'lower']
+    p.F = lambda x: np.array([-v for v in g_p._raw_objective(x)])  # 最大化問題に変換
+    p.c = [f'cns{i}' for i in range(len(g_p.constraints))]
     p.c_parameters = [[], []]
-    p.C = [upper, lower]
-    p.bounds = np.array(g_s.bounds)
+    p.C = g_p.constraints  # if feasible: return value <= 0
+    p.bounds = np.array(g_p.bounds)
     p.InfPoint = initial_points[0]  # initial といってもいいのでは？？
 
     f = F()
@@ -382,10 +400,10 @@ if __name__ == '__main__':
     f.dims = 2
     f.mins = p.bounds[:, 0]
     f.maxs = p.bounds[:, 1]
-    f.y = np.array([np.ones((2, f.dims)) * y for _ in p.c])
+    f.y = np.array([np.ones((g_p.n_obj, f.dims)) * y for _ in p.c])
     f.z = np.array([f.maxs.reshape(-1, 1) for _ in p.c])
     f.rho = .1
-    f.initial_points = initial_points
+    f.initial_points = initial_points.copy()
 
     c = C()
     c.grid_size = 10**5
@@ -396,18 +414,18 @@ if __name__ == '__main__':
     c.covfunc = []
     c.dims = 2
     c.optimize_ei = True
-    c.initial_points = initial_points
+    c.initial_points = initial_points.copy()
 
-    c2 = C()
-    c2.grid_size = 10**5
-    c2.max_iters = None
-    c2.step_iters = 50
-    c2.reduced_step_iters = 5
-    c2.meanfunc = []
-    c2.covfunc = []
-    c2.dims = 2
-    c2.optimize_ei = True
-    c2.initial_points = initial_points
+    # c2 = C()
+    # c2.grid_size = 10**5
+    # c2.max_iters = None
+    # c2.step_iters = 50
+    # c2.reduced_step_iters = 5
+    # c2.meanfunc = []
+    # c2.covfunc = []
+    # c2.dims = 2
+    # c2.optimize_ei = True
+    # c2.initial_points = initial_points
 
     total_budget = 100 * (len(p.c) + 1)
 
@@ -418,9 +436,9 @@ if __name__ == '__main__':
 
     o = Opt()
     o.f = f
-    o.c = [c, c2]
+    o.c = [c]  # , c2
     o.ADMM = admm
-    o._n_obj = 2
+    o._n_obj = g_p.n_obj
 
     _, candidate_x, _ = ADMMBO(p, o)
 
