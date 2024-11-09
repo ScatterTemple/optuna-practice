@@ -6,6 +6,7 @@ from src2.methods.admmbo.admmo_type import (
 from src2.problems.base_problem import Floats
 from tqdm import tqdm
 import warnings
+
 warnings.filterwarnings('ignore', category=Warning)
 
 
