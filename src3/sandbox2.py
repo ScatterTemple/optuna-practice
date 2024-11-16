@@ -3,8 +3,8 @@ import torch
 import gpytorch
 from matplotlib import pyplot as plt
 
-train_x = torch.linspace(0, 1, 20).unsqueeze(1).double()
-train_y = torch.sign(0.8+torch.cos(train_x * (4 * math.pi))).add(1).div(2).long().squeeze()  # 0 or 1
+train_x = torch.linspace(0, 1, 30).unsqueeze(1).double()
+train_y = torch.sign(0.95+torch.cos(train_x * (4 * math.pi))).add(1).div(2).long().squeeze()  # 0 or 1
 # train_y = torch.sign(torch.cos(train_x * (4 * math.pi))).long().squeeze()  # -1 or 1
 # train_y = torch.sign(torch.cos(train_x * (4 * math.pi))).add(1).long().squeeze()  # 0 or 2
 
@@ -31,14 +31,14 @@ class DirichletGPModel(ExactGP):
         # )
         self.mean_module = ConstantMean(batch_shape=torch.Size((num_classes,))).double()
 
-        self.covar_module = ScaleKernel(
-            RBFKernel(batch_shape=torch.Size((num_classes,))),
-            batch_shape=torch.Size((num_classes,)),
-        ).double()
         # self.covar_module = ScaleKernel(
-        #     MaternKernel(batch_shape=torch.Size((num_classes,)), nu=1/2),
+        #     RBFKernel(batch_shape=torch.Size((num_classes,))),
         #     batch_shape=torch.Size((num_classes,)),
         # ).double()
+        self.covar_module = ScaleKernel(
+            MaternKernel(batch_shape=torch.Size((num_classes,)), nu=1/2),
+            batch_shape=torch.Size((num_classes,)),
+        ).double()
         # self.covar_module = ScaleKernel(
         #     MaternKernel(batch_shape=torch.Size((num_classes,)), nu=3/2),
         #     batch_shape=torch.Size((num_classes,)),
@@ -70,7 +70,7 @@ likelihood.train()
 # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 # optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.5)
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.5)
 # optimizer = torch.optim.Adam(model.parameters(), lr=1.)
 # optimizer = torch.optim.Adam(model.parameters(), lr=10.)
 
