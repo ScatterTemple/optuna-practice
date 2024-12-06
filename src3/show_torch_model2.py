@@ -26,6 +26,40 @@ from gpytorch.means import ConstantMean, ZeroMean, LinearMean
 from gpytorch.likelihoods.gaussian_likelihood import GaussianLikelihood
 from gpytorch.priors.torch_priors import GammaPrior
 
+import gpytorch
+from gpytorch.models import ExactGP
+from gpytorch.likelihoods import DirichletClassificationLikelihood
+from gpytorch.means import ConstantMean, ZeroMean, LinearMean
+from gpytorch.kernels import ScaleKernel, RBFKernel, MaternKernel, ConstantKernel
+from gpytorch.priors import LKJPrior, UniformPrior
+from gpytorch.constraints import Interval
+
+
+class DirichletGPModel(ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_classes):
+        super(DirichletGPModel, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = ConstantMean(batch_shape=torch.Size((num_classes,))).double()
+
+        # self.covar_module = ScaleKernel(
+        #     RBFKernel(batch_shape=torch.Size((num_classes,))),
+        #     batch_shape=torch.Size((num_classes,)),
+        # ).double()
+
+        self.covar_module = ScaleKernel(
+            MaternKernel(batch_shape=torch.Size((num_classes,)), nu=1/2),
+            batch_shape=torch.Size((num_classes,)),
+        ).double()
+
+        # self.covar_module = ScaleKernel(
+        #     MaternKernel(batch_shape=torch.Size((num_classes,)), nu=3/2),
+        #     batch_shape=torch.Size((num_classes,)),
+        # ).double()
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
 
 # helper function
 def acqf_factory(ACQF_):
@@ -37,16 +71,12 @@ def acqf_factory(ACQF_):
             self.model_c = model
 
         def pof(self, X: torch.Tensor):
-            # 予測点の平均と標準偏差をもとにした正規分布の関数を作る
             _X = X.squeeze(1)
-            posterior = self.model_c.posterior(_X)
-            mean = posterior.mean
-            sigma = posterior.variance.sqrt()
-
-            # 積分する
-            normal = torch.distributions.Normal(mean, sigma)
-            cdf = 1. - normal.cdf(torch.tensor(0., device='cpu').double())
-            return cdf.squeeze(1)
+            test_dist = self.model_c(_X)
+            pred_samples = test_dist.sample(torch.Size((256,))).exp()
+            probabilities = (pred_samples / pred_samples.sum(-2, keepdim=True)).mean(0)
+            class_1_prob = probabilities[1]  # 厳密には 0 か 1 かを決める必要ある
+            return class_1_prob
 
         def forward(self, X: torch.Tensor):
             base_acqf = super().forward(X)
@@ -118,7 +148,7 @@ if __name__ == '__main__':
         # constraint
         c = np.abs(x) * np.abs(y)
         cns = dict(
-            cns1=np.array([-1 if _c < 1./4. else 1 for _c in c]),
+            cns1=np.array([0 if _c < 1./4. else 1 for _c in c]),
         )
 
         # ===== virtual trial =====
@@ -142,47 +172,42 @@ if __name__ == '__main__':
 
         # ===== train constraint =====
         train_X = normalize(tensor(prm_c), bounds=tensor(bounds))
-        train_Y = tensor(cns)
+        train_Y = tensor(cns).long().squeeze()
 
-        _batch_shape = SingleTaskGP.get_batch_dimensions(train_X, train_Y)[1]
-        _ard_num_dims = train_X.shape[-1]
-        gp_c = SingleTaskGP(
+        likelihood = DirichletClassificationLikelihood(train_Y)
+        model_c = DirichletGPModel(
             train_X,
-            train_Y,
-
-            # これがないと未観測の点や疎な点が大多数に引っ張られるが、
-            # これがあると pof 空間を虱潰ししにかかってしまう
-            # でもこれがあっても虱潰しは発生する
-            # train_Yvar=1e-4*torch.ones_like(train_Y),
-
-            outcome_transform=Standardize(m=train_Y.shape[1],),
-
-            mean_module=ZeroMean(batch_shape=_batch_shape),
-
-            covar_module=ScaleKernel(
-                base_kernel=MaternKernel(
-                    nu=1/2,
-                    ard_num_dims=_ard_num_dims,
-                    batch_shape=_batch_shape,
-                    lengthscale_prior=GammaPrior(3.0, 6.0),
-                ),
-                batch_shape=_batch_shape,
-                outputscale_prior=GammaPrior(2.0, 0.15),
-            ),
-
-            # # pof を軽視しすぎる
-            # covar_module=ScaleKernel(
-            #     base_kernel=RBFKernel(
-            #         ard_num_dims=_ard_num_dims,
-            #         batch_shape=_batch_shape,
-            #         # lengthscale_prior=GammaPrior(3.0, 6.0),
-            #     ),
-            #     batch_shape=_batch_shape,
-            #     # outputscale_prior=GammaPrior(2.0, 0.15),
-            # ),
+            likelihood.transformed_targets,
+            likelihood,
+            num_classes=likelihood.num_classes,
         )
-        mll_c = ExactMarginalLogLikelihood(gp_c.likelihood, gp_c)
-        fit_gpytorch_mll(mll_c)
+
+        model_c.train()
+        likelihood.train()
+
+        optimizer = torch.optim.Adam(model_c.parameters(), lr=0.1)
+
+        mll_c = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model_c)
+
+        for i in range(training_iter := 50):
+            # Zero gradients from previous iteration
+            optimizer.zero_grad()
+            # Output from model
+            output = model_c(train_X)
+            # Calc loss and backprop gradients
+            loss = -mll_c(output, likelihood.transformed_targets).sum()
+            loss.backward()
+            # if i % 5 == 0:
+            #     print('Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f' % (
+            #         i + 1, training_iter, loss.item(),
+            #         model.covar_module.base_kernel.lengthscale.mean().item(),
+            #         model.likelihood.second_noise_covar.noise.mean().item()
+            #     ))
+            optimizer.step()
+
+        # Go into eval mode
+        model_c.eval()
+        likelihood.eval()
 
         # ===== train model =====
         train_X = normalize(tensor(prm), bounds=tensor(bounds))
@@ -203,7 +228,7 @@ if __name__ == '__main__':
             model=gp,
             best_f=max(train_Y),
         )
-        acqf.set_model(gp_c)
+        acqf.set_model(model_c)
 
         # ===== optimize =====
         n_prms = train_X.shape[1]
@@ -220,77 +245,86 @@ if __name__ == '__main__':
 
         # ===== visualize =====
         if show_fig:
-            # contour xy
-            x = np.linspace(*bounds[tuple(prm.keys())[0]], 100)
-            y = np.linspace(*bounds[tuple(prm.keys())[1]], 100)
-            xx, yy = np.meshgrid(x, y)
-            xy = tensor([xx.flatten(), yy.flatten()]).t()
 
-            # helper function
-            def show_contour(zz_, layout_):
-                fig = go.Figure(layout=layout_)
-                fig.add_trace(
-                    go.Contour(
-                        x=x,
-                        y=y,
-                        z=zz_,
-                        colorscale='RdBu',
+            with torch.no_grad():
+
+                # contour xy
+                x = np.linspace(*bounds[tuple(prm.keys())[0]], 100)
+                y = np.linspace(*bounds[tuple(prm.keys())[1]], 100)
+                xx, yy = np.meshgrid(x, y)
+                xy = tensor([xx.flatten(), yy.flatten()]).t()
+
+                # helper function
+                def show_contour(zz_, layout_):
+                    fig = go.Figure(layout=layout_)
+                    fig.add_trace(
+                        go.Contour(
+                            x=x,
+                            y=y,
+                            z=zz_,
+                            colorscale='RdBu',
+                        )
                     )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=prm_c[tuple(prm_c.keys())[0]],
-                        y=prm_c[tuple(prm_c.keys())[1]],
-                        mode='markers',
-                        marker=dict(color='black'),
+                    fig.add_trace(
+                        go.Scatter(
+                            x=prm_c[tuple(prm_c.keys())[0]],
+                            y=prm_c[tuple(prm_c.keys())[1]],
+                            mode='markers',
+                            marker=dict(color='black'),
+                        )
                     )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=prm[tuple(prm.keys())[0]],
-                        y=prm[tuple(prm.keys())[1]],
-                        mode='markers',
-                        marker=dict(color='green'),
+                    fig.add_trace(
+                        go.Scatter(
+                            x=prm[tuple(prm.keys())[0]],
+                            y=prm[tuple(prm.keys())[1]],
+                            mode='markers',
+                            marker=dict(color='green'),
+                        )
                     )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=[next_point[0]],
-                        y=[next_point[1]],
-                        mode='markers',
-                        marker=dict(color='yellow', symbol='star', size=10, line_width=1),
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[next_point[0]],
+                            y=[next_point[1]],
+                            mode='markers',
+                            marker=dict(color='yellow', symbol='star', size=10, line_width=1),
+                        )
                     )
-                )
-                fig.show()
+                    fig.show()
 
-            # predicted mean
-            layout = go.Layout(title=f"Mean {count}")
-            posterior = gp.posterior(normalize(xy, bounds=tensor(bounds)))
-            zz = -posterior.mean.detach().numpy().flatten().reshape(xx.shape)  # maximize -> minimize
-            show_contour(zz, layout)
+                # predicted mean
+                layout = go.Layout(title=f"Mean {count}")
+                posterior = gp.posterior(normalize(xy, bounds=tensor(bounds)))
+                zz = -posterior.mean.detach().numpy().flatten().reshape(xx.shape)  # maximize -> minimize
+                show_contour(zz, layout)
 
-            # predicted stddev
-            layout = go.Layout(title=f"Stddev {count}")
-            posterior = gp.posterior(normalize(xy, bounds=tensor(bounds)))
-            zz = posterior.variance.sqrt().detach().numpy().flatten().reshape(xx.shape)
-            show_contour(zz, layout)
+                # predicted stddev
+                layout = go.Layout(title=f"Stddev {count}")
+                posterior = gp.posterior(normalize(xy, bounds=tensor(bounds)))
+                zz = posterior.variance.sqrt().detach().numpy().flatten().reshape(xx.shape)
+                show_contour(zz, layout)
 
-            # acqf
-            layout = go.Layout(title=f"ACQF {count}")
-            acqf_values = acqf.forward(normalize(xy, bounds=tensor(bounds)).unsqueeze(q))
-            zz = acqf_values.detach().numpy().flatten().reshape(xx.shape)
-            if 'Log' in type(acqf).__name__:
-                layout = go.Layout(title=f"ACQF (symlog) {count}")
-                zz = symlog(zz)
-            show_contour(zz, layout)
+                # acqf
+                layout = go.Layout(title=f"ACQF {count}")
+                acqf_values = acqf.forward(normalize(xy.unsqueeze(q), bounds=tensor(bounds)))
+                zz = acqf_values.detach().numpy().flatten().reshape(xx.shape)
+                if 'Log' in type(acqf).__name__:
+                    layout = go.Layout(title=f"ACQF (symlog) {count}")
+                    zz = symlog(zz)
+                show_contour(zz, layout)
 
-            # PoF
-            layout = go.Layout(title=f"PoF {count}")
-            posterior = gp_c.posterior(normalize(xy, bounds=tensor(bounds)))
-            mean = posterior.mean
-            std = posterior.variance.sqrt()
-            zz = 1 - torch.distributions.Normal(mean, std).cdf(torch.tensor(0.)).detach().numpy().flatten().reshape(xx.shape)
-            show_contour(zz, layout)
+                # PoF
+                layout = go.Layout(title=f"PoF {count}")
+
+                test_dist = model_c(normalize(xy, bounds=tensor(bounds)))
+                pred_samples = test_dist.sample(torch.Size((256,))).exp()
+                probabilities = (pred_samples / pred_samples.sum(-2, keepdim=True)).mean(0)
+                zz = probabilities[1]  # 厳密には 0 か 1 かを決める必要ある
+
+                # posterior = gp_c.posterior(normalize(xy, bounds=tensor(bounds)))
+                # mean = posterior.mean
+                # std = posterior.variance.sqrt()
+                # zz = 1 - torch.distributions.Normal(mean, std).cdf(torch.tensor(0.)).detach().numpy().flatten().reshape(xx.shape)
+                show_contour(zz, layout)
 
         for k in prm.keys():
             prm[k] = prm_c[k].copy()
