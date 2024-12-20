@@ -7,6 +7,8 @@ from botorch.models.transforms import Normalize, Standardize
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from botorch.fit import fit_gpytorch_mll
 from scipy.optimize import minimize, NonlinearConstraint
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 print('===== seed =====')
@@ -28,8 +30,14 @@ x = numpy.random.rand(100, dim) * 2 - 1
 bounds = [[-1, 1]] * dim
 y = problem(x)
 
+print('----- x -----')
+print(x[:5])
 
-print('===== training =====')
+print('----- y -----')
+print(y[:5].reshape(-1, 1))
+
+
+print('===== create surrogate model =====')
 def tensor(x):
     if isinstance(x, list):
         x = numpy.array(x)
@@ -53,7 +61,6 @@ mll = ExactMarginalLogLikelihood(model.likelihood, model)
 fit_gpytorch_mll(mll)
 
 
-print('===== optimize =====')
 # surrogate function from surrogete model
 def surrogate_func(x):
     if len(x.shape) == 1:
@@ -68,21 +75,32 @@ def surrogate_func(x):
         raise RuntimeError
 
 
+print('----- evaluate surrogate model -----')
+print(f'x=[0, 0], y={surrogate_func(numpy.array([0, 0])).round(4)}')
+print(f'x=[1, 0], y={surrogate_func(numpy.array([1, 0])).round(4)}')
+print(f'x=[0, 1], y={surrogate_func(numpy.array([0, 1])).round(4)}')
+print(f'x=[1, 1], y={surrogate_func(numpy.array([1, 1])).round(4)}')
+
+
 # optimize
+print('===== optimize =====')
 ...  # 略
 opt_x = [0 for _ in range(dim)]
+print('----- optimize result -----')
+print(f'x={opt_x}, y={surrogate_func(numpy.array(opt_x)).round(4)}')
 
-print(surrogate_func(numpy.array(opt_x)))
 
-
-print('===== sensitivity =====')
+print('===== sensitivity of optimize result =====')
+sigma = 1
 # create normal distribution for each input
-x_normals = [chaospy.Normal(mu=_x, sigma=1) for _x in opt_x]
+x_normals = [chaospy.Normal(mu=_x, sigma=sigma) for _x in opt_x]
 x_distribution = chaospy.J(*x_normals)  # ?
 
 # sampling from distribution and mapping them to the objective space
-x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="sobol")
-y_samples: numpy.ndarray = surrogate_func(x_samples.T)
+# x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="sobol")
+# x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="random")
+x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="grid")
+y_of_x_distribution_samples: numpy.ndarray = surrogate_func(x_distribution_samples.T)
 
 # noinspection PyTypeChecker
 # polynomical expansion of the input distribution
@@ -93,21 +111,32 @@ x_distribution_expansion: chaospy.ndpoly = chaospy.generate_expansion(
 
 # noinspection PyTypeChecker
 # polynomial expansion of surrogate function
-surrogate_func_expansion: chaospy.ndpoly = chaospy.fit_regression(
+線形回帰: chaospy.ndpoly = chaospy.fit_regression(
     x_distribution_expansion,  # polynomial expansion of the original input distribution
-    x_samples,  # samples from original input distribution
-    y_samples,  # mapped samples
+    x_distribution_samples,  # samples from original input distribution
+    y_of_x_distribution_samples,  # mapped samples
 )
 
 # 1st order Sobol' index (VarXi / VarY)
 sobol_indices: numpy.ndarray = chaospy.Sens_m(
-    surrogate_func_expansion,
+    線形回帰,
     x_distribution
 )
 
+chaospy.E(x_distribution)
+
+"""
+sobol_indices: numpy.ndarray = chaospy.Sens_m(
+    x_distribution_expansion,
+    x_distribution
+)
+"""
+
+
+
 # Total Sobol' index
 sobol_indices_t: numpy.ndarray = chaospy.Sens_t(
-    surrogate_func_expansion,
+    線形回帰,
     x_distribution
 )
 
@@ -115,7 +144,7 @@ sobol_indices_t: numpy.ndarray = chaospy.Sens_t(
 print('===== reverse-MORDO =====')
 # これが目的
 y_mean = numpy.array([0])
-y_std = numpy.array([1])
+y_std = numpy.array([0.1])
 y_distribution = chaospy.Normal(y_mean, y_std)
 
 # 入力変数を定義
@@ -241,7 +270,7 @@ def o_objective(trial: optuna.Trial):
     for i in range(dim):
         x.append(trial.suggest_float(f'm{i}', -1, 1))
     for i in range(dim):
-        s_ = trial.suggest_float(f's{i}', 0, 2)  # bounds の range
+        s_ = trial.suggest_float(f's{i}', 0, 0.2)  # bounds の range
         x.append(s_)
         s.append(s_)
 
@@ -256,21 +285,21 @@ def o_constraint(trial: optuna.trial.FrozenTrial):
 
 
 study = optuna.create_study(
-    sampler=optuna.samplers.NSGAIISampler(
+    # sampler=optuna.samplers.NSGAIISampler(
+    sampler=optuna.samplers.TPESampler(
         constraints_func=o_constraint,
     ),
     directions=['maximize'] * dim
 )
 
-study.optimize(o_objective, timeout=120)
+study.optimize(o_objective, timeout=30)
 
 
 m = numpy.empty(shape=(0, dim))
 s = numpy.empty(shape=(0, dim))
-for t in study.best_trials:
-    # print(t.params, t.values)
-    # print(t.user_attrs['constraint'])
 
+for t in study.best_trials:
+# for t in study.trials:
     m_ = numpy.empty(shape=(1, dim))
     s_ = numpy.empty(shape=(1, dim))
     for k, v in t.params.items():
@@ -282,8 +311,10 @@ for t in study.best_trials:
     m = numpy.concat([m, m_], axis=0)
     s = numpy.concat([s, s_], axis=0)
 
+    print(t.params)
     print((m_**2).sum())
-    # print((s_**2).sum())
+    print(t.user_attrs['constraint'])
+    print()
 
 
 import plotly.graph_objects as go
