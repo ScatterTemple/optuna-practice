@@ -22,7 +22,7 @@ def problem(x: numpy.ndarray):
 
 
 print('===== training data =====')
-dim = 2
+dim = 4
 bound = [-1, 1]
 bounds = [bound] * dim
 x = numpy.random.rand(100, dim) * (bound[1] - bound[0]) + bound[0]
@@ -65,13 +65,57 @@ x_distribution = chaospy.J(*x_normals)  # ?
 
 # sampling from distribution and mapping them to the objective space
 # to create the `global-locally-normal surrogate-surrogate-model`.
-x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="grid")
+
+
+# ===== rule の挙動の調査 =====
+"""
+``additive_recursion``  Modulus of golden ratio samples.
+``chebyshev``           Roots of first order Chebyshev polynomials.
+``grid``                Regular spaced grid.
+``halton``              Halton low-discrepancy sequence.
+``hammersley``          Hammersley low-discrepancy sequence.
+``korobov``             Korobov lattice.
+``latin_hypercube``     Latin hypercube samples.
+``nested_chebyshev``    Chebyshev nodes adjusted to ensure nested.
+``nested_grid``         Nested regular spaced grid.
+``random``              Classical (Pseudo-)Random samples.
+``sobol``               Sobol low-discrepancy sequence.
+"""
+
+N = 1000
+
+
+def show(rule):
+    x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([N]), rule=rule)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=x_distribution_samples[0], y=x_distribution_samples[1], mode='markers'
+    ))
+    fig.update_layout(title=rule)
+    fig.show()
+
+# print(rule := 'random', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'sobol', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'additive_recursion', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'chebyshev', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N**dim)
+# print(rule := 'grid', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N**dim)
+# print(rule := 'halton', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'hammersley', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'korobov', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'latin_hypercube', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, N)
+# print(rule := 'nested_chebyshev', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, 1046529)
+# print(rule := 'nested_grid', x_distribution.sample(numpy.array([N]), rule=rule).shape); show(rule)  # (dim, 1046529)
+
+# ===== rule の挙動の調査 おわり =====
+
+
+x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([20]), rule="sobol")
 y_distribution_samples: numpy.ndarray = surrogate_func(x_distribution_samples.T)
 
 # noinspection PyTypeChecker
 # basis polynomical function expansion of the input distribution
 x_distribution_basis_function_expansion: chaospy.ndpoly = chaospy.generate_expansion(
-    8,  # Order of polynomial expansion.
+    4,  # Order of polynomial expansion. dim が大きく order も大きいと分散、特に感度の計算にスタックしたかと見紛うほどの時間がかかる
     x_distribution
 )
 

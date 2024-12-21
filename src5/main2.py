@@ -97,10 +97,10 @@ x_normals = [chaospy.Normal(mu=_x, sigma=sigma) for _x in opt_x]
 x_distribution = chaospy.J(*x_normals)  # ?
 
 # sampling from distribution and mapping them to the objective space
-# x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="sobol")
+x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="sobol")
 # x_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="random")
-x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="grid")
-y_of_x_distribution_samples: numpy.ndarray = surrogate_func(x_distribution_samples.T)
+# x_distribution_samples: numpy.ndarray = x_distribution.sample(numpy.array([1000]), rule="grid")
+x_distribution_samples: numpy.ndarray = surrogate_func(x_samples.T)
 
 # noinspection PyTypeChecker
 # polynomical expansion of the input distribution
@@ -139,6 +139,10 @@ sobol_indices_t: numpy.ndarray = chaospy.Sens_t(
     線形回帰,
     x_distribution
 )
+
+
+import sys
+sys.exit()
 
 
 print('===== reverse-MORDO =====')
