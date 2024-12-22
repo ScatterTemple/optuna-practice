@@ -10,8 +10,8 @@ from botorch.fit import fit_gpytorch_mll
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.quasirandom import SobolEngine
 from torch.distributions.normal import Normal
-from SALib.sample import sobol as saltelli
-from SALib.analyze import sobol
+from SALib.sample import sobol as sample_sobol
+from SALib.analyze import sobol as analyze_sobol
 import plotly.graph_objects as go
 
 
@@ -20,8 +20,8 @@ def calc_VAR_SAMPLE_SIZE(upper, dim_):
     size = 0
     while size <= upper:
         count += 1
-        size = (2 * dim_ + 2) * count  # for deplecated saltelli code
-        # size = 2 ** count
+        # size = (2 * dim_ + 2) * count
+        size = 2 ** count
     return size
 
 # config
@@ -29,8 +29,8 @@ seed = None
 dim = 10
 TRAIING_SAMPLE_SIZE = 100 * dim
 VAR_SAMPLE_SIZE = 50 * dim; VAR_SAMPLE_SIZE = calc_VAR_SAMPLE_SIZE(VAR_SAMPLE_SIZE, dim)
-VAR_SAMPLE_METHOD = 'sobol'
-TEST_X_MEAN = 0.5
+VAR_SAMPLE_METHOD = 'saltelli'
+TEST_X_MEAN = 0.1
 USE_FORCE_NO_NOISE = False
 
 # seed
@@ -101,7 +101,8 @@ sigma_list = numpy.array([0.1] * dim)
 problem = {
     'num_vars': dim,
     'names': [f'x{i}' for i in range(dim)],
-    'bounds': bounds,
+    'bounds': [[m, s] for m, s in zip(mean_list, sigma_list)],  # When an entry for dists is not ‘unif’, the bounds entry does not indicate parameter bounds but sample-specific metadata.
+    'dists': ['norm'] * dim
 }
 
 # ----- sobol を使わない場合...分散のばらつきが大きいので不採用 -----
@@ -144,8 +145,8 @@ elif VAR_SAMPLE_METHOD == 'sobol':
 
 elif VAR_SAMPLE_METHOD == 'saltelli':
     # サンプルを作成
-    # x_dist_samples = saltelli.sample(problem, N=int(VAR_SAMPLE_SIZE / (2 + 2 * dim)))  # deprecated saltelli module
-    x_dist_samples = saltelli.sample(problem, N=VAR_SAMPLE_SIZE)
+    # x_dist_samples = sobol_sample.sample(problem, N=int(VAR_SAMPLE_SIZE / (2 + 2 * dim)))
+    x_dist_samples = sample_sobol.sample(problem, N=VAR_SAMPLE_SIZE)
     x_dist_samples = tensor(x_dist_samples)
 
 else:
@@ -168,10 +169,7 @@ for i in range(mapped_samples.shape[-1]):
 
 
 # 感度分析
-
-# Define the model inputs
-# Perform analysis
-Si = sobol.analyze(
+Si = analyze_sobol.analyze(
     problem,
     mapped_samples_i,
     print_to_console=True,
