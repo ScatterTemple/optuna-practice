@@ -10,15 +10,28 @@ from botorch.fit import fit_gpytorch_mll
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.quasirandom import SobolEngine
 from torch.distributions.normal import Normal
+from SALib.sample import sobol as saltelli
+from SALib.analyze import sobol
 import plotly.graph_objects as go
 
+
+def calc_VAR_SAMPLE_SIZE(upper, dim_):
+    count = 0
+    size = 0
+    while size <= upper:
+        count += 1
+        size = (2 * dim_ + 2) * count  # for deplecated saltelli code
+        # size = 2 ** count
+    return size
 
 # config
 seed = None
 dim = 10
 TRAIING_SAMPLE_SIZE = 100 * dim
-VAR_SAMPLE_SIZE = 500 * dim
-USE_SOBOL = True
+VAR_SAMPLE_SIZE = 50 * dim; VAR_SAMPLE_SIZE = calc_VAR_SAMPLE_SIZE(VAR_SAMPLE_SIZE, dim)
+VAR_SAMPLE_METHOD = 'sobol'
+TEST_X_MEAN = 0.5
+USE_FORCE_NO_NOISE = False
 
 # seed
 if seed is not None:
@@ -84,8 +97,15 @@ with torch.no_grad():
 mean_list = numpy.array([TEST_X_MEAN] * dim)
 sigma_list = numpy.array([0.1] * dim)
 
+# saltelli を使う場合および感度分析に使う問題設定
+problem = {
+    'num_vars': dim,
+    'names': [f'x{i}' for i in range(dim)],
+    'bounds': bounds,
+}
+
 # ----- sobol を使わない場合...分散のばらつきが大きいので不採用 -----
-if not USE_SOBOL:
+if VAR_SAMPLE_METHOD == 'random':
     # 入力分布の計算
     covariance = torch.eye(dim, device='cpu', dtype=torch.double)
     for i, sigma in enumerate(sigma_list):
@@ -106,7 +126,7 @@ if not USE_SOBOL:
 
 
 # ----- sobol を使う場合 -----
-else:
+elif VAR_SAMPLE_METHOD == 'sobol':
     # 入力分布の計算
     soboleng = SobolEngine(1, scramble=seed is not None)
     x_dist_list = [Normal(m, s) for m, s in zip(mean_list, sigma_list)]
@@ -122,6 +142,14 @@ else:
     # scatter(x_dist_samples[:, 0], x_dist_samples[:, 1]).show()
     # print(x_dist_samples[:, 0].var().sqrt())
 
+elif VAR_SAMPLE_METHOD == 'saltelli':
+    # サンプルを作成
+    # x_dist_samples = saltelli.sample(problem, N=int(VAR_SAMPLE_SIZE / (2 + 2 * dim)))  # deprecated saltelli module
+    x_dist_samples = saltelli.sample(problem, N=VAR_SAMPLE_SIZE)
+    x_dist_samples = tensor(x_dist_samples)
+
+else:
+    raise NotImplementedError
 
 # surrogate model を使ってマッピング
 mapped_samples = model.posterior(x_dist_samples).mean.detach().numpy()
@@ -137,3 +165,14 @@ for i in range(mapped_samples.shape[-1]):
 
 # 確認
 # hist(mapped_samples_i).show()
+
+
+# 感度分析
+
+# Define the model inputs
+# Perform analysis
+Si = sobol.analyze(
+    problem,
+    mapped_samples_i,
+    print_to_console=True,
+)
