@@ -37,7 +37,13 @@ def obj(x):
 
 
 # training data
-x = numpy.random.rand(TRAIING_SAMPLE_SIZE, dim) * (bound[1] - bound[0]) + bound[0]
+x = numpy.concat(
+    [
+        TEST_X_MEAN + numpy.zeros((1, dim)),
+        numpy.random.rand(TRAIING_SAMPLE_SIZE, dim) * (bound[1] - bound[0]) + bound[0]
+    ],
+    axis=0
+)
 y = obj(x)
 
 
@@ -51,20 +57,21 @@ if len(Y.shape) == 1:
     Y = Y.unsqueeze(0)
 Y = Y.T
 B = tensor(bounds).T
-YVar = 1e-6 * torch.ones_like(Y)
+standardizer = Standardize(m=Y.shape[-1])
+standardizer.forward(Y); _, YVar = standardizer.untransform(Y, 1e-6 * torch.ones_like(Y))
 model = SingleTaskGP(
     train_X=X,
     train_Y=Y,
     train_Yvar=YVar,
     input_transform=Normalize(d=X.shape[-1], bounds=B),
-    outcome_transform=Standardize(m=Y.shape[-1]),
+    outcome_transform=standardizer,
 )
 mll = ExactMarginalLogLikelihood(model.likelihood, model)
 fit_gpytorch_mll(mll)
 
 
 # 確認
-x_test = tensor([[0.5]*dim])
+x_test = tensor([[TEST_X_MEAN]*dim])
 post = model.posterior(x_test)
 with torch.no_grad():
     print('model の精度確認')
@@ -74,7 +81,7 @@ with torch.no_grad():
 # ===== 分散の伝搬の計算 =====
 
 # ユーザー定義分散の計算
-mean_list = numpy.array([0.5] * dim)
+mean_list = numpy.array([TEST_X_MEAN] * dim)
 sigma_list = numpy.array([0.1] * dim)
 
 # ----- sobol を使わない場合...分散のばらつきが大きいので不採用 -----
